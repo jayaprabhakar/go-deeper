@@ -4,7 +4,31 @@ import (
     "errors"
     "fmt"
     "reflect"
+    "strings"
+    "sync"
 )
+
+var (
+    stats      = make(map[string]int)
+    statsMutex sync.Mutex // Mutex for concurrent access
+)
+
+// UpdateStats increments the count for the given type in the stats map.
+func UpdateStats(typeName string) {
+    statsMutex.Lock()
+    defer statsMutex.Unlock()
+    stats[typeName]++
+}
+
+func FormatStats() string {
+    statsMutex.Lock()
+    defer statsMutex.Unlock()
+    b := strings.Builder{}
+    for k, v := range stats {
+        b.WriteString(fmt.Sprintf("%s: %d\n", k, v))
+    }
+    return b.String()
+}
 
 // Cloneable interface defines objects that can clone themselves.
 type Cloneable interface {
@@ -97,6 +121,7 @@ func (cm *CloneManager) clonePtr(src reflect.Value) (interface{}, error) {
     if err != nil {
         return nil, err
     }
+    UpdateStats(src.Kind().String())
 
     clonePtr := reflect.New(src.Elem().Type())
     clonePtr.Elem().Set(reflect.ValueOf(cloned))
@@ -110,19 +135,25 @@ func (cm *CloneManager) cloneSlice(src reflect.Value) (interface{}, error) {
         return nil, nil
     }
 
+    // Check if we've already cloned this slice
+    ptr := src.Pointer()
+    if cloned, found := cm.visited[ptr]; found {
+        return cloned, nil
+    }
+
     // Create a new slice of the same type and length
     clone := reflect.MakeSlice(src.Type(), src.Len(), src.Cap())
+    cm.visited[ptr] = clone.Interface()
 
-    // Clone each element in the slice
+    // Iterate through the slice and deep clone each element
     for i := 0; i < src.Len(); i++ {
-        elem := src.Index(i)
-        clonedElem, err := cm.deepClone(elem)
+        clonedElem, err := cm.deepClone(src.Index(i))
         if err != nil {
             return nil, err
         }
         clone.Index(i).Set(reflect.ValueOf(clonedElem))
     }
-
+    UpdateStats(src.Kind().String())
     return clone.Interface(), nil
 }
 
@@ -140,7 +171,7 @@ func (cm *CloneManager) cloneArray(src reflect.Value) (interface{}, error) {
         }
         clone.Index(i).Set(reflect.ValueOf(clonedElem))
     }
-
+    UpdateStats(src.Kind().String())
     return clone.Interface(), nil
 }
 
@@ -150,25 +181,33 @@ func (cm *CloneManager) cloneMap(src reflect.Value) (interface{}, error) {
         return nil, nil
     }
 
+    // Use the map's underlying pointer as the key
+    ptr := src.Pointer()
+
+    // Check if we've already cloned this map
+    if cloned, found := cm.visited[ptr]; found {
+        return cloned, nil
+    }
+
     // Create a new map of the same type
     clone := reflect.MakeMapWithSize(src.Type(), src.Len())
+    cm.visited[ptr] = clone.Interface()
 
-    // Clone each key-value pair
+    // Deep clone each key-value pair in the map
     for _, key := range src.MapKeys() {
         clonedKey, err := cm.deepClone(key)
         if err != nil {
             return nil, err
         }
 
-        value := src.MapIndex(key)
-        clonedValue, err := cm.deepClone(value)
+        clonedValue, err := cm.deepClone(src.MapIndex(key))
         if err != nil {
             return nil, err
         }
 
         clone.SetMapIndex(reflect.ValueOf(clonedKey), reflect.ValueOf(clonedValue))
     }
-
+    UpdateStats(src.Kind().String())
     return clone.Interface(), nil
 }
 
@@ -198,6 +237,6 @@ func (cm *CloneManager) cloneStruct(src reflect.Value) (interface{}, error) {
             }
         }
     }
-
+    UpdateStats(src.Type().String())
     return clone.Interface(), nil
 }
