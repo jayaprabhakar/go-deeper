@@ -186,7 +186,16 @@ func (cm *CloneManager) cloneStruct(src reflect.Value) (interface{}, error) {
             if err != nil {
                 return nil, err
             }
-            clonedFieldRef.Set(reflect.ValueOf(clonedField))
+            //clonedFieldRef.Set(reflect.ValueOf(clonedField))
+            // Ensure the cloned value is not zero
+            if !clonedFieldRef.IsValid() {
+                return nil, fmt.Errorf("cannot set invalid field at index %d", i)
+            }
+
+            // Set the cloned field only if the value is valid
+            if clonedField != nil {
+                clonedFieldRef.Set(reflect.ValueOf(clonedField))
+            }
         }
     }
 
