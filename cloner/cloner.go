@@ -64,6 +64,31 @@ func (cm *CloneManager) Clone(src interface{}) (interface{}, error) {
     return cm.deepClone(reflect.ValueOf(src))
 }
 
+// Clone performs a deep clone of the given object and returns it as the same type.
+func Clone[T any](cm *CloneManager, src T) (T, error) {
+    // Initialize the result as a zero value of type T
+    var result T
+
+    // Handle nil case for pointer types
+    if reflect.ValueOf(src).IsNil() {
+        return result, nil // Return zero value for nil pointers
+    }
+
+    // Deep clone the value
+    clonedValue, err := cm.Clone(src)
+    if err != nil {
+        return result, err
+    }
+
+    // Assert the cloned value back to type T
+    clonedValueTyped, ok := clonedValue.(T)
+    if !ok {
+        return result, errors.New("failed to cast cloned value to the original type")
+    }
+
+    return clonedValueTyped, nil
+}
+
 // deepClone handles recursive cloning and checks for registered Cloner or Cloneable interfaces.
 func (cm *CloneManager) deepClone(src reflect.Value) (interface{}, error) {
     if !src.IsValid() {
@@ -96,6 +121,8 @@ func (cm *CloneManager) deepClone(src reflect.Value) (interface{}, error) {
         return cm.cloneMap(src)
     case reflect.Struct:
         return cm.cloneStruct(src)
+    case reflect.Interface:
+        return cm.cloneInterface(src)
     case reflect.Chan:
         return nil, errors.New("channels cannot be cloned")
     case reflect.Func:
@@ -237,6 +264,27 @@ func (cm *CloneManager) cloneStruct(src reflect.Value) (interface{}, error) {
             }
         }
     }
-    UpdateStats(src.Type().String())
+    UpdateStats(src.Kind().String() + " " + src.Type().String())
     return clone.Interface(), nil
+}
+
+func (cm *CloneManager) cloneInterface(src reflect.Value) (interface{}, error) {
+    // Get the underlying value
+    underlyingValue := src.Elem()
+
+    // Check for nil underlying value
+    if !underlyingValue.IsValid() {
+        return nil, nil // Return nil for nil underlying value
+    }
+    if src.IsNil() {
+        return nil, nil
+    }
+    // Clone the underlying value
+    clonedValue, err := cm.deepClone(underlyingValue)
+    if err != nil {
+        return nil, err
+    }
+    UpdateStats(src.Kind().String() + " " + src.Type().String())
+    // Return as an interface type
+    return reflect.ValueOf(clonedValue).Convert(src.Type()).Interface(), nil
 }
